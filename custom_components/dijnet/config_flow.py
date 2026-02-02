@@ -48,7 +48,9 @@ class DijnetOptionsFlowHandler(OptionsFlow):
                 ): str,
                 vol.Required(
                     CONF_ENCASHMENT_REPORTED_AS_PAID_AFTER_DEADLINE,
-                    default=self._config_entry.data[CONF_ENCASHMENT_REPORTED_AS_PAID_AFTER_DEADLINE],
+                    default=self._config_entry.data[
+                        CONF_ENCASHMENT_REPORTED_AS_PAID_AFTER_DEADLINE
+                    ],
                 ): bool,
             }
         )
