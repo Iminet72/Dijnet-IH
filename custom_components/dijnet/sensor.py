@@ -26,7 +26,7 @@ from .controller import DijnetController, InvoiceIssuer, get_controller
 _LOGGER = logging.getLogger(__name__)
 
 
-def _parse_deadline(raw_deadline) -> date | None:
+def _parse_deadline(raw_deadline: date | datetime | str | None) -> date | None:
     """Convert deadline value to date."""
     if raw_deadline is None:
         return None
@@ -37,6 +37,7 @@ def _parse_deadline(raw_deadline) -> date | None:
     if isinstance(raw_deadline, str):
         return datetime.fromisoformat(raw_deadline).date()
     return None
+
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
