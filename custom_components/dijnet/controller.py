@@ -709,8 +709,8 @@ class DijnetController:
             .date()
             .isoformat()
         )
-        total_amount = float(re.sub(r"[^0-9\-]+", "", row.children("td:nth-child(5)").text()))
-        amount = float(re.sub(r"[^0-9\-]+", "", row.children("td:nth-child(7)").text()))
+        total_amount = int(re.sub(r"[^0-9\-]+", "", row.children("td:nth-child(5)").text()))
+        amount = int(re.sub(r"[^0-9\-]+", "", row.children("td:nth-child(7)").text()))
         deadline = (
             datetime.strptime(row.children("td:nth-child(6)").text(), DATE_FORMAT)
             .replace(tzinfo=TZ)
