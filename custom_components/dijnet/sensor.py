@@ -1,6 +1,7 @@
 """Support for Dijnet."""
 
 import logging
+from datetime import date, datetime
 from typing import Self
 
 import homeassistant.helpers.config_validation as cv
@@ -23,6 +24,19 @@ from .const import CONF_DOWNLOAD_DIR, DOMAIN
 from .controller import DijnetController, InvoiceIssuer, get_controller
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _parse_deadline(raw_deadline) -> date | None:
+    """Convert deadline value to date."""
+    if raw_deadline is None:
+        return None
+    if isinstance(raw_deadline, date) and not isinstance(raw_deadline, datetime):
+        return raw_deadline
+    if isinstance(raw_deadline, datetime):
+        return raw_deadline.date()
+    if isinstance(raw_deadline, str):
+        return datetime.fromisoformat(raw_deadline).date()
+    return None
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
@@ -159,9 +173,9 @@ class InvoiceAmountSensor(SensorEntity):
         self._attr_native_value = sum([invoice.amount for invoice in invoices])
 
         # Find the earliest deadline among unpaid invoices
-        next_payment_deadline = (
-            min([invoice.deadline for invoice in invoices]) if invoices else None
-        )
+        deadlines = [_parse_deadline(invoice.deadline) for invoice in invoices]
+        deadlines = [deadline for deadline in deadlines if deadline is not None]
+        next_payment_deadline = min(deadlines) if deadlines else None
 
         self._attr_extra_state_attributes = {
             "unpaid_invoices": [invoice.to_dictionary() for invoice in invoices],
@@ -228,6 +242,6 @@ class InvoiceDeadlineSensor(SensorEntity):
         ]
 
         # Set the state to the earliest deadline, or None if no unpaid invoices
-        self._attr_native_value = (
-            min([invoice.deadline for invoice in invoices]) if invoices else None
-        )
+        deadlines = [_parse_deadline(invoice.deadline) for invoice in invoices]
+        deadlines = [deadline for deadline in deadlines if deadline is not None]
+        self._attr_native_value = min(deadlines) if deadlines else None
