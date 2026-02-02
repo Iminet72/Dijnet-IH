@@ -372,7 +372,7 @@ class DijnetController:
 
             search_page = await session.get_invoice_search_page()
 
-            match = re.search(r"var ropts = (.*);", search_page.decode("iso-8859-2"))
+            match = re.search(r"var\s+ropts\s*=\s*(.*);", search_page.decode("iso-8859-2"))
             if match:
                 providers_json = match.group(1)
             else:
