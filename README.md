@@ -29,6 +29,7 @@ Copy the `custom_components/dijnet` to your `custom_components` folder. Reboot H
 
 - The integration provides services for every invoice issuer. Every invoice issuer could have multiple providers. For example DBH Zrt. invoice issuer handles invoices for FV Zrt. and FCSM Zrt. In that case the integration creates separate sensors for these providers.
 - For all providers an invoice amount sensor is created. It contains the sum of unpaid amount for a provider. The details of the unpaid invoices can be read out from `unpaid_invoices` attribute of the sensor.
+- For all providers a payment deadline sensor is created. It shows the earliest payment deadline (fizetési határidő) among the unpaid invoices for that provider. When there are no unpaid invoices, the sensor state is `unknown`.
 <!-- - For all providers a calendar entity is created. These entities are disabled by default. You can enable them by selecting 'Enable entity' toggle. The calendar entity registers an event for every incoming invoice. The event start date is the issuance date of the invoice. The event end date is the deadline of the invoice. If the invoices is paid before deadline, the end date of the event became the payment date. If the invoice is not paid until deadline the event end date will be today. -->
 
 ## Enable debug logging

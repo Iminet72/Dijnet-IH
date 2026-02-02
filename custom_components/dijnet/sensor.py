@@ -79,15 +79,20 @@ async def async_setup_entry(
     controller = get_controller(hass, config_entry.data[CONF_USERNAME])
 
     for registered_invoice_issuer in await controller.get_issuers():
-        async_add_entities(
-            [
+        sensors = []
+        for provider in registered_invoice_issuer.providers:
+            sensors.append(
                 InvoiceAmountSensor(
                     controller, config_entry.entry_id, registered_invoice_issuer, provider
                 )
-                for provider in registered_invoice_issuer.providers
-            ]
-        )
-        _LOGGER.debug("Sensor added (%s)", registered_invoice_issuer)
+            )
+            sensors.append(
+                InvoiceDeadlineSensor(
+                    controller, config_entry.entry_id, registered_invoice_issuer, provider
+                )
+            )
+        async_add_entities(sensors)
+        _LOGGER.debug("Sensors added (%s)", registered_invoice_issuer)
 
     _LOGGER.info("Setting up Dijnet sensors completed.")
     return True
@@ -118,7 +123,6 @@ class InvoiceAmountSensor(SensorEntity):
         """
         self._controller = controller
         self._invoice_issuer = invoice_issuer
-        self._state = None
         self._attr_unique_id = (
             f"{config_entry_id}_{invoice_issuer.issuer}_"
             f"{invoice_issuer.issuer_id}_{provider}_amount"
@@ -163,3 +167,67 @@ class InvoiceAmountSensor(SensorEntity):
             "unpaid_invoices": [invoice.to_dictionary() for invoice in invoices],
             "next_payment_deadline": next_payment_deadline,
         }
+
+
+class InvoiceDeadlineSensor(SensorEntity):
+    """Represents an invoice payment deadline sensor."""
+
+    def __init__(
+        self: Self,
+        controller: DijnetController,
+        config_entry_id: str,
+        invoice_issuer: InvoiceIssuer,
+        provider: str,
+    ) -> None:
+        """
+        Initializes a new instance of `InvoiceDeadlineSensor` class.
+
+        Args:
+          controller:
+            The Dijnet controller.
+          config_entry_id:
+            The unique id of the config entry.
+          invoice_issuer:
+            The invoice issuer.
+          provider:
+            The invoice provider.
+        """
+        self._controller = controller
+        self._invoice_issuer = invoice_issuer
+        self._attr_unique_id = (
+            f"{config_entry_id}_{invoice_issuer.issuer}_"
+            f"{invoice_issuer.issuer_id}_{provider}_deadline"
+        )
+        self._provider = provider
+        self.entity_description = SensorEntityDescription(
+            key="invoice_deadline",
+            device_class=SensorDeviceClass.DATE,
+            name=f"Dijnet - {provider} fizetési határidő",
+        )
+
+    @property
+    def device_info(self: Self) -> DeviceInfo:
+        """Returns the device information."""
+        return DeviceInfo(
+            entry_type=DeviceEntryType.SERVICE,
+            configuration_url="https://dijnet.hu/",
+            manufacturer="Dijnet Zrt",
+            identifiers={
+                (DOMAIN, self._invoice_issuer.issuer + "|" + self._invoice_issuer.issuer_id)
+            },
+            name=self._invoice_issuer.display_name,
+        )
+
+    async def async_update(self: Self) -> None:
+        """Called when the entity should update its state."""
+        invoices = [
+            invoice
+            for invoice in await self._controller.get_unpaid_invoices()
+            if invoice.display_name == self._invoice_issuer.display_name
+            and invoice.provider == self._provider
+        ]
+
+        # Set the state to the earliest deadline, or None if no unpaid invoices
+        self._attr_native_value = (
+            min([invoice.deadline for invoice in invoices]) if invoices else None
+        )
