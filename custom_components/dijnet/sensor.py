@@ -179,7 +179,9 @@ class InvoiceAmountSensor(SensorEntity):
 
         self._attr_extra_state_attributes = {
             "unpaid_invoices": [invoice.to_dictionary() for invoice in invoices],
-            "next_payment_deadline": next_payment_deadline,
+            "next_payment_deadline": next_payment_deadline.isoformat()
+            if next_payment_deadline
+            else None,
         }
 
 
