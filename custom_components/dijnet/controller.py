@@ -372,7 +372,7 @@ class DijnetController:
         return self._issuers
 
     @Throttle(MIN_TIME_BETWEEN_ISSUER_UPDATES)
-    async def update_registered_issuers(self: Self) -> None:
+    async def update_registered_issuers(self: Self) -> None:  # noqa: C901
         """Updates the registered issuers list."""
         issuers: list[InvoiceIssuer] = []
 
@@ -390,9 +390,7 @@ class DijnetController:
 
             # Try to extract ropts with improved regex (handles CDATA, spacing, minification)
             match = re.search(
-                r"var\s+ropts\s*=\s*(\[.*?\]);",
-                search_page.decode("iso-8859-2"),
-                re.DOTALL
+                r"var\s+ropts\s*=\s*(\[.*?\]);", search_page.decode("iso-8859-2"), re.DOTALL
             )
             raw_providers: list[Any] = []
             provider_alias_mapping: dict[str, list[str]] = {}
@@ -431,7 +429,7 @@ class DijnetController:
                                 provider_alias_mapping[alias].append(provider_name)
                     _LOGGER.debug(
                         "Extracted %d provider-alias mappings from invoice list",
-                        len(provider_alias_mapping)
+                        len(provider_alias_mapping),
                     )
                 except Exception:
                     _LOGGER.exception("Fallback method also failed")
@@ -458,9 +456,7 @@ class DijnetController:
                 # If no providers found from ropts, use fallback mapping
                 if not providers and display_name in provider_alias_mapping:
                     providers = provider_alias_mapping[display_name]
-                    _LOGGER.debug(
-                        "Using fallback mapping for %s: %s", display_name, providers
-                    )
+                    _LOGGER.debug("Using fallback mapping for %s: %s", display_name, providers)
 
                 issuer = InvoiceIssuer(issuer_id, issuer_name, display_name, providers)
                 issuers.append(issuer)
