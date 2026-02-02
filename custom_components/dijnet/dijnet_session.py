@@ -125,7 +125,7 @@ class DijnetSession:
           The invoice list page content.
         """
         _LOGGER.debug("Getting szamla_list page.")
-        async with self._session.get(f"{ROOT_URL}/ekonto/control/szamla_list") as response:
+        async with self._session.get(f"{ROOT_URL}/ekonto/control/szamla_list_uj") as response:
             return await response.read()
 
     async def get_invoice_download_page(self: Self) -> bytes:
