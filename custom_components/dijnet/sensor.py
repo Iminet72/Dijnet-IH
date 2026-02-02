@@ -153,6 +153,13 @@ class InvoiceAmountSensor(SensorEntity):
             and invoice.provider == self._provider
         ]
         self._attr_native_value = sum([invoice.amount for invoice in invoices])
+
+        # Find the earliest deadline among unpaid invoices
+        next_payment_deadline = (
+            min([invoice.deadline for invoice in invoices]) if invoices else None
+        )
+
         self._attr_extra_state_attributes = {
-            "unpaid_invoices": [invoice.to_dictionary() for invoice in invoices]
+            "unpaid_invoices": [invoice.to_dictionary() for invoice in invoices],
+            "next_payment_deadline": next_payment_deadline,
         }
