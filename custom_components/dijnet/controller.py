@@ -372,14 +372,53 @@ class DijnetController:
 
             search_page = await session.get_invoice_search_page()
 
-            match = re.search(r"var\s+ropts\s*=\s*(.*);", search_page.decode("iso-8859-2"))
+            # Try to extract ropts with improved regex (handles CDATA, spacing, minification)
+            match = re.search(
+                r"var\s+ropts\s*=\s*(\[.*?\]);",
+                search_page.decode("iso-8859-2"),
+                re.DOTALL
+            )
+            raw_providers: list[Any] = []
+            provider_alias_mapping: dict[str, str] = {}
+
             if match:
                 providers_json = match.group(1)
+                try:
+                    raw_providers = json.loads(providers_json)
+                    _LOGGER.debug(
+                        "Successfully extracted %d providers from ropts", len(raw_providers)
+                    )
+                except json.JSONDecodeError as e:
+                    _LOGGER.warning("Failed to parse providers JSON from search page: %s", e)
             else:
-                _LOGGER.error("Failed to extract providers JSON from search page")
-                return
+                _LOGGER.warning(
+                    "Failed to extract providers JSON from search page. "
+                    "This may be due to a website update. Attempting fallback method."
+                )
 
-            raw_providers: list[Any] = json.loads(providers_json)
+            # Fallback: Extract provider mappings from invoice list page
+            if not raw_providers:
+                _LOGGER.info("Using fallback method to extract provider mappings from invoice list")
+                try:
+                    invoice_list_page = await session.get_invoice_list_page()
+                    invoice_list_pyquery = PyQuery(
+                        invoice_list_page.decode("iso-8859-2").encode("utf-8")
+                    )
+                    for row in invoice_list_pyquery.find(".table > tbody > tr").items():
+                        provider_name = row.children("td:nth-child(1)").text()
+                        alias = row.children("td:nth-child(2)").text()
+                        if provider_name and alias:
+                            # Store mapping from alias to provider name
+                            if alias not in provider_alias_mapping:
+                                provider_alias_mapping[alias] = []
+                            if provider_name not in provider_alias_mapping[alias]:
+                                provider_alias_mapping[alias].append(provider_name)
+                    _LOGGER.debug(
+                        "Extracted %d provider-alias mappings from invoice list",
+                        len(provider_alias_mapping)
+                    )
+                except Exception:
+                    _LOGGER.exception("Fallback method also failed")
 
             await session.get_new_providers_page()
 
@@ -392,11 +431,21 @@ class DijnetController:
                 issuer_name = row.children("td:nth-child(1)").text()
                 issuer_id = row.children("td:nth-child(2)").text()
                 display_name = row.children("td:nth-child(3)").text() or issuer_id
+
+                # First try to get providers from ropts
                 providers = [
                     raw_provider["szlaszolgnev"]
                     for raw_provider in raw_providers
                     if (raw_provider["alias"] or raw_provider["aliasnev"]) == display_name
                 ]
+
+                # If no providers found from ropts, use fallback mapping
+                if not providers and display_name in provider_alias_mapping:
+                    providers = provider_alias_mapping[display_name]
+                    _LOGGER.debug(
+                        "Using fallback mapping for %s: %s", display_name, providers
+                    )
+
                 issuer = InvoiceIssuer(issuer_id, issuer_name, display_name, providers)
                 issuers.append(issuer)
                 _LOGGER.debug("Issuer found (%s)", issuer)
@@ -422,113 +471,158 @@ class DijnetController:
 
             await session.get_main_page()
 
+            # First, load the current unpaid invoices from szamla_list_uj
+            # This is more reliable for current balance tracking
+            _LOGGER.debug("Loading current unpaid invoices from szamla_list_uj")
+            current_unpaid_invoices: list[Invoice] = []
+            try:
+                invoice_list_page = await session.get_invoice_list_page()
+                invoice_list_pyquery = PyQuery(
+                    invoice_list_page.decode("iso-8859-2").encode("utf-8")
+                )
+                for row in invoice_list_pyquery.find(".table > tbody > tr").items():
+                    # Parse unpaid invoices from the current list
+                    # These should all be unpaid based on the page name "Fizetendő számlák"
+                    try:
+                        invoice = self._create_invoice_from_row(row)
+                        current_unpaid_invoices.append(invoice)
+                    except Exception as e:  # noqa: BLE001
+                        _LOGGER.warning("Failed to parse invoice from list page: %s", e)
+
+                _LOGGER.debug("Found %d current unpaid invoices", len(current_unpaid_invoices))
+            except Exception as e:  # noqa: BLE001
+                _LOGGER.warning("Failed to load current unpaid invoices from list page: %s", e)
+
+            # Now also search for invoices in the specified date range
+            # This helps track paid invoices and historical data
             search_page = await session.get_invoice_search_page()
             search_page_pyquery = PyQuery(search_page.decode("iso-8859-2").encode("utf-8"))
 
-            vfw_token = next(
-                search_page_pyquery.find(
-                    "form[action=szamla_search_submit] input[name=vfw_token]"
-                ).items()
-            ).val()
+            # Extract vfw_token - look for any hidden input with name vfw_token
+            vfw_token = None
+            try:
+                vfw_token_elements = search_page_pyquery.find("input[name=vfw_token]")
+                if vfw_token_elements:
+                    vfw_token = next(vfw_token_elements.items()).val()
+                    _LOGGER.debug("Successfully extracted vfw_token")
+                else:
+                    _LOGGER.warning(
+                        "Failed to extract vfw_token: No input element with name "
+                        "'vfw_token' found. Will use only current unpaid invoices "
+                        "from list page."
+                    )
+                    # Continue with just the current unpaid invoices
+                    vfw_token = None
+            except (StopIteration, AttributeError) as e:
+                _LOGGER.warning("Failed to extract vfw_token: %s. Using only current invoices.", e)
+                vfw_token = None
 
-            vfw_token = next(
-                search_page_pyquery.find(
-                    "form[action=szamla_search_submit] input[name=vfw_token]"
-                ).items()
-            ).val()
-
-            search_result = await session.post_search_invoice("", "", vfw_token, from_date, to_date)
-
-            invoices_pyquery = PyQuery(search_result.decode("iso-8859-2").encode("utf-8"))
             possible_new_paid_invoices: list[PaidInvoice] = []
             possible_new_unpaid_invoices: list[Invoice] = []
-            index = 0
-            for row in invoices_pyquery.find(".table > tbody > tr").items():
-                invoice: Invoice = None
-                is_paid: bool | None = self._is_invoice_paid(row)
-                if is_paid is None:
-                    _LOGGER.error(
-                        "Failed to determine invoice state. State column text: %s",
-                        row.children("td:nth-child(8)").text(),
-                    )
-                    continue
 
-                if is_paid:
-                    await session.get_invoice_page(index)
-                    invoice_history_page = await session.get_invoice_history_page()
-                    invoice_history_page_response_pyquery = PyQuery(
-                        invoice_history_page.decode("iso-8859-2").encode("utf-8")
-                    )
-                    for history_row in invoice_history_page_response_pyquery.find(
-                        ".table tr"
-                    ).items():
-                        if history_row.children("td:nth-child(4)").text() == "**Sikeres fizetés**":
-                            paid_at = (
-                                datetime.strptime(
-                                    history_row.children("td:nth-child(1)").text(), DATE_FORMAT
-                                )
-                                .replace(tzinfo=TZ)
-                                .date()
-                                .isoformat()
-                            )
-                            invoice = self._create_invoice_from_row(row, paid_at)
-                            possible_new_paid_invoices.append(invoice)
-                        else:
-                            # payment info not found, but invoice paid
-                            paid_at = (
-                                datetime.strptime(
-                                    row.children("td:nth-child(6)").text(), DATE_FORMAT
-                                )
-                                .replace(tzinfo=TZ)
-                                .date()
-                                .isoformat()
-                            )
-                            invoice = self._create_invoice_from_row(row, paid_at)
-                            possible_new_paid_invoices.append(invoice)
+            # Only do search if we have vfw_token
+            if vfw_token:
+                search_result = await session.post_search_invoice(
+                    "", "", vfw_token, from_date, to_date
+                )
 
-                else:
-                    invoice = self._create_invoice_from_row(row)
-                    possible_new_unpaid_invoices.append(invoice)
-
-                if self._download_dir != "":
-                    directory = path.join(self._download_dir, slugify(invoice.provider))
-                    makedirs(directory, exist_ok=True)
-                    if invoice is not PaidInvoice:
-                        await session.get_invoice_page(index)
-
-                    invoice_download_page = await session.get_invoice_download_page()
-
-                    unpaid_invoice_download_page_response_pyquery = PyQuery(
-                        invoice_download_page.decode("iso-8859-2").encode("utf-8")
-                    )
-
-                    for downloadable_link in unpaid_invoice_download_page_response_pyquery.find(
-                        "#content_bs a[href*=szamla_pdf], a[href*=szamla_xml]"
-                    ).items():
-                        href = downloadable_link.attr("href")
-                        extension = href.split("?")[0].split("_")[-1]
-                        name = href.split("?")[0][:-4]
-                        filename = (
-                            slugify(
-                                f"{datetime.fromisoformat(invoice.issuance_date).strftime('%Y%m%d')}_{invoice.invoice_no}_{name}"
-                            )
-                            + f".{extension}"
+                invoices_pyquery = PyQuery(search_result.decode("iso-8859-2").encode("utf-8"))
+                index = 0
+                for row in invoices_pyquery.find(".table > tbody > tr").items():
+                    invoice: Invoice = None
+                    is_paid: bool | None = self._is_invoice_paid(row)
+                    if is_paid is None:
+                        _LOGGER.error(
+                            "Failed to determine invoice state. State column text: %s",
+                            row.children("td:nth-child(8)").text(),
                         )
-                        download_url = f"https://www.dijnet.hu/ekonto/control/{href}"
-                        _LOGGER.debug("Downloadable file found (%s).", download_url)
+                        continue
 
-                        full_path = path.join(directory, filename)
+                    if is_paid:
+                        await session.get_invoice_page(index)
+                        invoice_history_page = await session.get_invoice_history_page()
+                        invoice_history_page_response_pyquery = PyQuery(
+                            invoice_history_page.decode("iso-8859-2").encode("utf-8")
+                        )
+                        for history_row in invoice_history_page_response_pyquery.find(
+                            ".table tr"
+                        ).items():
+                            payment_status = history_row.children("td:nth-child(4)").text()
+                            if payment_status == "**Sikeres fizetés**":
+                                paid_at = (
+                                    datetime.strptime(
+                                        history_row.children("td:nth-child(1)").text(), DATE_FORMAT
+                                    )
+                                    .replace(tzinfo=TZ)
+                                    .date()
+                                    .isoformat()
+                                )
+                                invoice = self._create_invoice_from_row(row, paid_at)
+                                possible_new_paid_invoices.append(invoice)
+                            else:
+                                # payment info not found, but invoice paid
+                                paid_at = (
+                                    datetime.strptime(
+                                        row.children("td:nth-child(6)").text(), DATE_FORMAT
+                                    )
+                                    .replace(tzinfo=TZ)
+                                    .date()
+                                    .isoformat()
+                                )
+                                invoice = self._create_invoice_from_row(row, paid_at)
+                                possible_new_paid_invoices.append(invoice)
 
-                        if path.exists(full_path):
-                            _LOGGER.debug("File already downloaded (%s)", full_path)
-                        else:
-                            _LOGGER.info("Downloading file (%s -> %s).", download_url, full_path)
-                            file_content = await session.download(download_url)
-                            async with await anyio.open_file(full_path, "wb") as file:
-                                await file.write(file_content)
+                    else:
+                        invoice = self._create_invoice_from_row(row)
+                        possible_new_unpaid_invoices.append(invoice)
 
-                index += 1
-                await session.get_invoice_list_page()
+                    if self._download_dir != "":
+                        directory = path.join(self._download_dir, slugify(invoice.provider))
+                        makedirs(directory, exist_ok=True)
+                        if invoice is not PaidInvoice:
+                            await session.get_invoice_page(index)
+
+                        invoice_download_page = await session.get_invoice_download_page()
+
+                        unpaid_invoice_download_page_response_pyquery = PyQuery(
+                            invoice_download_page.decode("iso-8859-2").encode("utf-8")
+                        )
+
+                        for downloadable_link in unpaid_invoice_download_page_response_pyquery.find(
+                            "#content_bs a[href*=szamla_pdf], a[href*=szamla_xml]"
+                        ).items():
+                            href = downloadable_link.attr("href")
+                            extension = href.split("?")[0].split("_")[-1]
+                            name = href.split("?")[0][:-4]
+                            filename = (
+                                slugify(
+                                    f"{datetime.fromisoformat(invoice.issuance_date).strftime('%Y%m%d')}_{invoice.invoice_no}_{name}"
+                                )
+                                + f".{extension}"
+                            )
+                            download_url = f"https://www.dijnet.hu/ekonto/control/{href}"
+                            _LOGGER.debug("Downloadable file found (%s).", download_url)
+
+                            full_path = path.join(directory, filename)
+
+                            if path.exists(full_path):
+                                _LOGGER.debug("File already downloaded (%s)", full_path)
+                            else:
+                                _LOGGER.info(
+                                    "Downloading file (%s -> %s).", download_url, full_path
+                                )
+                                file_content = await session.download(download_url)
+                                async with await anyio.open_file(full_path, "wb") as file:
+                                    await file.write(file_content)
+
+                    index += 1
+                    await session.get_invoice_list_page()
+
+            # Add current unpaid invoices from the list page
+            # These are more reliable for current balance
+            for current_invoice in current_unpaid_invoices:
+                if current_invoice not in possible_new_unpaid_invoices:
+                    possible_new_unpaid_invoices.append(current_invoice)
 
             paid_invoices = self._paid_invoices.copy()
             unpaid_invoices = self._unpaid_invoices.copy()
