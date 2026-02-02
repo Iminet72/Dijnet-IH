@@ -123,7 +123,6 @@ class InvoiceAmountSensor(SensorEntity):
         """
         self._controller = controller
         self._invoice_issuer = invoice_issuer
-        self._state = None
         self._attr_unique_id = (
             f"{config_entry_id}_{invoice_issuer.issuer}_"
             f"{invoice_issuer.issuer_id}_{provider}_amount"
@@ -195,7 +194,6 @@ class InvoiceDeadlineSensor(SensorEntity):
         """
         self._controller = controller
         self._invoice_issuer = invoice_issuer
-        self._state = None
         self._attr_unique_id = (
             f"{config_entry_id}_{invoice_issuer.issuer}_"
             f"{invoice_issuer.issuer_id}_{provider}_deadline"
