@@ -15,7 +15,7 @@ import yaml
 from homeassistant.util import Throttle, slugify
 from pyquery import PyQuery
 
-from .const import DATA_CONTROLLER, DOMAIN
+from .const import ATTR_TOTAL_AMOUNT, DATA_CONTROLLER, DOMAIN
 from .dijnet_session import DijnetSession
 
 if TYPE_CHECKING:
@@ -103,6 +103,7 @@ class Invoice:
         issuance_date: datetime,
         amount: int,
         deadline: datetime,
+        total_amount: int | None = None,
     ):
         """
         Initialize a new instance of Invoice class.
@@ -117,9 +118,11 @@ class Invoice:
           issuance_date:
             The issuance date.
           amount:
-            The invoice amount.
+            The invoice payable amount.
           deadline:
             The deadline.
+          total_amount:
+            The invoice total amount (optional, defaults to amount if not provided).
         """
         self._provider = provider
         self._display_name = display_name
@@ -127,6 +130,7 @@ class Invoice:
         self._issuance_date = issuance_date
         self._amount = amount
         self._deadline = deadline
+        self._total_amount = total_amount
 
     @property
     def provider(self: Self) -> str:
@@ -150,8 +154,13 @@ class Invoice:
 
     @property
     def amount(self: Self) -> int:
-        """Gets the issuance date."""
+        """Gets the payable amount."""
         return self._amount
+
+    @property
+    def total_amount(self: Self) -> int:
+        """Gets the invoice total amount (falls back to amount if not set)."""
+        return self._total_amount if self._total_amount is not None else self._amount
 
     @property
     def deadline(self: Self) -> datetime:
@@ -184,6 +193,7 @@ class Invoice:
             ATTR_ISSUANCE_DATE: self.issuance_date,
             ATTR_AMOUNT: self.amount,
             ATTR_DEADLINE: self.deadline,
+            ATTR_TOTAL_AMOUNT: self.total_amount,
         }
 
     def __str__(self: Self):
@@ -203,6 +213,7 @@ class PaidInvoice(Invoice):
         amount: int,
         deadline: datetime,
         paid_at: datetime,
+        total_amount: int | None = None,
     ) -> None:
         """
         Initialize a new instance of Invoice class.
@@ -217,13 +228,17 @@ class PaidInvoice(Invoice):
           issuance_date:
             The issuance date.
           amount:
-            The invoice amount.
+            The invoice payable amount.
           deadline:
             The deadline.
           paid_at:
             The date of payment.
+          total_amount:
+            The invoice total amount (optional, defaults to amount if not provided).
         """
-        super().__init__(provider, display_name, invoice_no, issuance_date, amount, deadline)
+        super().__init__(
+            provider, display_name, invoice_no, issuance_date, amount, deadline, total_amount
+        )
         self._paid_at = paid_at
 
     @property
@@ -255,6 +270,7 @@ class PaidInvoice(Invoice):
             if isinstance(dictionary[ATTR_DEADLINE], datetime)
             else dictionary[ATTR_DEADLINE],
             dictionary[ATTR_PAID_AT],
+            dictionary.get(ATTR_TOTAL_AMOUNT),
         )
 
     def to_dictionary(self: Self) -> dict[str, Any]:
@@ -693,6 +709,7 @@ class DijnetController:
             .date()
             .isoformat()
         )
+        total_amount = float(re.sub(r"[^0-9\-]+", "", row.children("td:nth-child(5)").text()))
         amount = float(re.sub(r"[^0-9\-]+", "", row.children("td:nth-child(7)").text()))
         deadline = (
             datetime.strptime(row.children("td:nth-child(6)").text(), DATE_FORMAT)
@@ -704,10 +721,25 @@ class DijnetController:
         invoice: Invoice = None
         if paid_at:
             invoice = PaidInvoice(
-                provider, display_name, invoice_no, issuance_date, amount, deadline, paid_at
+                provider,
+                display_name,
+                invoice_no,
+                issuance_date,
+                amount,
+                deadline,
+                paid_at,
+                total_amount,
             )
         else:
-            invoice = Invoice(provider, display_name, invoice_no, issuance_date, amount, deadline)
+            invoice = Invoice(
+                provider,
+                display_name,
+                invoice_no,
+                issuance_date,
+                amount,
+                deadline,
+                total_amount,
+            )
 
         _LOGGER.info("Invoice created. %s", invoice)
 
