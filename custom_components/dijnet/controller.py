@@ -379,7 +379,7 @@ class DijnetController:
                 re.DOTALL
             )
             raw_providers: list[Any] = []
-            provider_alias_mapping: dict[str, str] = {}
+            provider_alias_mapping: dict[str, list[str]] = {}
 
             if match:
                 providers_json = match.group(1)
@@ -547,8 +547,9 @@ class DijnetController:
                         for history_row in invoice_history_page_response_pyquery.find(
                             ".table tr"
                         ).items():
-                            payment_status = history_row.children("td:nth-child(4)").text()
-                            if payment_status == "**Sikeres fizetés**":
+                            payment_text = history_row.children("td:nth-child(4)").text()
+                            is_successful_payment = payment_text == "**Sikeres fizetés**"
+                            if is_successful_payment:
                                 paid_at = (
                                     datetime.strptime(
                                         history_row.children("td:nth-child(1)").text(), DATE_FORMAT
@@ -579,7 +580,7 @@ class DijnetController:
                     if self._download_dir != "":
                         directory = path.join(self._download_dir, slugify(invoice.provider))
                         makedirs(directory, exist_ok=True)
-                        if invoice is not PaidInvoice:
+                        if not isinstance(invoice, PaidInvoice):
                             await session.get_invoice_page(index)
 
                         invoice_download_page = await session.get_invoice_download_page()
