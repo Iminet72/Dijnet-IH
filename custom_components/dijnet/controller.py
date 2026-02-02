@@ -43,6 +43,20 @@ ATTR_PAID_AT = "paid_at"
 TZ = pytz.timezone("Europe/Budapest")
 
 
+def convert_deadline_to_date(deadline_str: str) -> date:
+    """
+    Convert deadline value to date.
+
+    Args:
+      deadline_str:
+        The deadline string in DATE_FORMAT (%Y.%m.%d).
+
+    Returns:
+      The converted date object.
+    """
+    return datetime.strptime(deadline_str, DATE_FORMAT).replace(tzinfo=TZ).date()
+
+
 class InvoiceIssuer:
     """Represents an invoice issuer."""
 
@@ -707,12 +721,7 @@ class DijnetController:
         )
         total_amount = int(re.sub(r"[^0-9\-]+", "", row.children("td:nth-child(5)").text()))
         amount = int(re.sub(r"[^0-9\-]+", "", row.children("td:nth-child(7)").text()))
-        deadline = (
-            datetime.strptime(row.children("td:nth-child(6)").text(), DATE_FORMAT)
-            .replace(tzinfo=TZ)
-            .date()
-            .isoformat()
-        )
+        deadline = convert_deadline_to_date(row.children("td:nth-child(6)").text()).isoformat()
 
         invoice: Invoice = None
         if paid_at:
@@ -761,11 +770,7 @@ class DijnetController:
         collection: bool = "Csoportos beszedés" in state_text or "Beszedés alatt" in state_text
         if collection:
             if self._encashment_reported_as_paid_after_deadline:
-                deadline = (
-                    datetime.strptime(row.children("td:nth-child(6)").text(), DATE_FORMAT)
-                    .replace(tzinfo=TZ)
-                    .date()
-                )
+                deadline = convert_deadline_to_date(row.children("td:nth-child(6)").text())
                 return deadline < datetime.now(tz=TZ).date()
             return False
         return None
