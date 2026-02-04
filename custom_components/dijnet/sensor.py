@@ -43,7 +43,9 @@ def _parse_deadline(raw_deadline: date | datetime | str | None) -> date | None:
                 return date.fromisoformat(normalized_deadline)
             except ValueError:
                 continue
-        _LOGGER.debug("Unrecognized deadline format: %s", raw_deadline)
+        _LOGGER.debug(
+            "Unrecognized deadline format (tried YYYY-MM-DD and YYYY.MM.DD): %s", raw_deadline
+        )
 
     return None
 
