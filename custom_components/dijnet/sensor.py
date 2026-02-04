@@ -38,9 +38,9 @@ def _parse_deadline(raw_deadline: date | datetime | str | None) -> date | None:
         return raw_deadline
 
     if isinstance(raw_deadline, str):
-        for value in (raw_deadline, raw_deadline.replace(".", "-")):
+        for normalized_deadline in (raw_deadline, raw_deadline.replace(".", "-")):
             try:
-                return date.fromisoformat(value)
+                return date.fromisoformat(normalized_deadline)
             except ValueError:
                 continue
         _LOGGER.debug("Unrecognized deadline format: %s", raw_deadline)
