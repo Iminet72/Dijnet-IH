@@ -35,13 +35,13 @@ def _parse_deadline(raw_deadline: date | datetime | str | None) -> date | None:
     if isinstance(raw_deadline, datetime):
         return raw_deadline.date()
     if isinstance(raw_deadline, str):
-        try:
-            return datetime.fromisoformat(raw_deadline).date()
-        except ValueError:
+        for fmt in ("%Y-%m-%d", "%Y.%m.%d"):
             try:
-                return datetime.strptime(raw_deadline, "%Y.%m.%d").date()
+                return datetime.strptime(raw_deadline, fmt).date()
             except ValueError:
-                return None
+                continue
+        _LOGGER.debug("Unrecognized deadline format: %s", raw_deadline)
+        return None
     return None
 
 
