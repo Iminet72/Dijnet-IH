@@ -1,5 +1,7 @@
 """Tests for invoice_list_parser module."""
 
+# ruff: noqa: S101, T201, PT017
+
 from custom_components.dijnet.invoice_list_parser import (
     format_dijnet_date,
     parse_invoice_list_from_js,
@@ -16,9 +18,12 @@ def test_parse_invoice_list_from_js_with_multiple_invoices() -> None:
 </head>
 <body>
 <script>
-pushSz({"bdt":20260121,"tid":666991321,"gid":-1638659138,"oss":4281,"szn":"FCSM Zrt.","egy":4281,"rid":0,"dst":"Rendezetlen","fdt":20260215});
-pushSz({"bdt":20260121,"tid":666991321,"gid":-1638633213,"oss":2659,"szn":"FV Zrt.","egy":2659,"rid":1,"dst":"Rendezetlen","fdt":20260215});
-pushSz({"bdt":20260115,"tid":-1633646386,"gid":-1633646386,"oss":1298,"szn":"Fejérvíz Zrt.","egy":1298,"rid":2,"dst":"Csoportos beszedés","fdt":20260317});
+pushSz({"bdt":20260121,"tid":666991321,"gid":-1638659138,"oss":4281,"szn":"FCSM Zrt.","egy":4281,
+"rid":0,"dst":"Rendezetlen","fdt":20260215});
+pushSz({"bdt":20260121,"tid":666991321,"gid":-1638633213,"oss":2659,"szn":"FV Zrt.","egy":2659,
+"rid":1,"dst":"Rendezetlen","fdt":20260215});
+pushSz({"bdt":20260115,"tid":-1633646386,"gid":-1633646386,"oss":1298,"szn":"Fejérvíz Zrt.",
+"egy":1298,"rid":2,"dst":"Csoportos beszedés","fdt":20260317});
 </script>
 </body>
 </html>"""
@@ -74,8 +79,10 @@ def test_parse_invoice_list_from_js_with_special_characters() -> None:
 </head>
 <body>
 <script>
-pushSz({"bdt":20260101,"tid":123,"gid":456,"oss":1000,"szn":"Vízmű Zrt.","egy":1000,"rid":0,"dst":"Rendezetlen","fdt":20260201});
-pushSz({"bdt":20260102,"tid":789,"gid":101,"oss":2000,"szn":"Áramszolgáltató Kft.","egy":2000,"rid":1,"dst":"Csoportos beszedés","fdt":20260202});
+pushSz({"bdt":20260101,"tid":123,"gid":456,"oss":1000,"szn":"Vízmű Zrt.","egy":1000,
+"rid":0,"dst":"Rendezetlen","fdt":20260201});
+pushSz({"bdt":20260102,"tid":789,"gid":101,"oss":2000,"szn":"Áramszolgáltató Kft.",
+"egy":2000,"rid":1,"dst":"Csoportos beszedés","fdt":20260202});
 </script>
 </body>
 </html>"""
@@ -94,9 +101,11 @@ def test_parse_invoice_list_from_js_invalid_json() -> None:
 <html>
 <body>
 <script>
-pushSz({"bdt":20260121,"szn":"Valid Inc.","oss":1000,"egy":1000,"rid":0,"dst":"Rendezetlen","fdt":20260215});
+pushSz({"bdt":20260121,"szn":"Valid Inc.","oss":1000,"egy":1000,"rid":0,
+"dst":"Rendezetlen","fdt":20260215});
 pushSz({invalid json here});
-pushSz({"bdt":20260122,"szn":"Another Valid Inc.","oss":2000,"egy":2000,"rid":1,"dst":"Rendezetlen","fdt":20260216});
+pushSz({"bdt":20260122,"szn":"Another Valid Inc.","oss":2000,"egy":2000,"rid":1,
+"dst":"Rendezetlen","fdt":20260216});
 </script>
 </body>
 </html>"""
