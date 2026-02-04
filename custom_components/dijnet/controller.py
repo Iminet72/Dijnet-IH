@@ -17,6 +17,7 @@ from pyquery import PyQuery
 
 from .const import ATTR_TOTAL_AMOUNT, DATA_CONTROLLER, DOMAIN
 from .dijnet_session import DijnetSession
+from .invoice_list_parser import format_dijnet_date, parse_invoice_list_from_js
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -503,19 +504,39 @@ class DijnetController:
             current_unpaid_invoices: list[Invoice] = []
             try:
                 invoice_list_page = await session.get_invoice_list_page()
-                invoice_list_pyquery = PyQuery(
-                    invoice_list_page.decode("iso-8859-2").encode("utf-8")
-                )
-                for row in invoice_list_pyquery.find(".table > tbody > tr").items():
-                    # Parse unpaid invoices from the current list
-                    # These should all be unpaid based on the page name "Fizetendő számlák"
-                    try:
-                        invoice = self._create_invoice_from_row(row)
-                        current_unpaid_invoices.append(invoice)
-                    except Exception as e:  # noqa: BLE001
-                        _LOGGER.warning("Failed to parse invoice from list page: %s", e)
 
-                _LOGGER.debug("Found %d current unpaid invoices", len(current_unpaid_invoices))
+                # Try to parse invoices from JavaScript pushSz calls first
+                js_invoice_data = parse_invoice_list_from_js(invoice_list_page)
+
+                if js_invoice_data:
+                    _LOGGER.debug(
+                        "Using JavaScript-based parser, found %d pushSz calls", len(js_invoice_data)
+                    )
+                    for invoice_data in js_invoice_data:
+                        invoice = self._create_invoice_from_js_data(invoice_data)
+                        if invoice:
+                            current_unpaid_invoices.append(invoice)
+
+                    _LOGGER.debug(
+                        "Parsed %d current unpaid invoices from JavaScript data",
+                        len(current_unpaid_invoices),
+                    )
+                else:
+                    # Fallback to DOM-based parsing if no pushSz calls found
+                    _LOGGER.debug("No pushSz calls found, falling back to DOM-based parsing")
+                    invoice_list_pyquery = PyQuery(
+                        invoice_list_page.decode("iso-8859-2").encode("utf-8")
+                    )
+                    for row in invoice_list_pyquery.find(".table > tbody > tr").items():
+                        # Parse unpaid invoices from the current list
+                        # These should all be unpaid based on the page name "Fizetendő számlák"
+                        try:
+                            invoice = self._create_invoice_from_row(row)
+                            current_unpaid_invoices.append(invoice)
+                        except Exception as e:  # noqa: BLE001
+                            _LOGGER.warning("Failed to parse invoice from list page: %s", e)
+
+                    _LOGGER.debug("Found %d current unpaid invoices", len(current_unpaid_invoices))
             except Exception as e:  # noqa: BLE001
                 _LOGGER.warning("Failed to load current unpaid invoices from list page: %s", e)
 
@@ -749,6 +770,74 @@ class DijnetController:
         _LOGGER.info("Invoice created. %s", invoice)
 
         return invoice
+
+    def _create_invoice_from_js_data(self: Self, invoice_data: dict[str, Any]) -> Invoice | None:
+        """
+        Create an Invoice object from JavaScript pushSz data.
+
+        Args:
+          invoice_data:
+            The invoice data dictionary from pushSz call with keys like
+            'bdt', 'fdt', 'szn', 'oss', 'egy', 'dst', 'rid', 'gid', 'tid'.
+
+        Returns:
+          An Invoice object, or None if the invoice should be skipped
+          (e.g., if it's a "Csoportos beszedés" invoice and the configuration
+          says to treat them as paid after deadline has passed).
+        """
+        try:
+            # Extract fields from JavaScript data
+            provider = invoice_data.get("szn", "Unknown")
+            # Use provider as display_name since we don't have separate display_name in JS data
+            display_name = provider
+            # Use gid (group ID) as invoice number since we don't have invoice_no in JS data
+            # If gid is negative or missing, use tid or a combination
+            gid = invoice_data.get("gid", 0)
+            tid = invoice_data.get("tid", 0)
+            invoice_no = f"GID{gid}_TID{tid}"
+
+            # Convert dates from YYYYMMDD to ISO-8601
+            issuance_date = format_dijnet_date(invoice_data["bdt"])
+            deadline = format_dijnet_date(invoice_data["fdt"])
+
+            # Get amounts
+            total_amount = invoice_data.get("oss", 0)
+            amount = invoice_data.get("egy", total_amount)
+
+            # Check status to determine if should be included
+            status = invoice_data.get("dst", "")
+
+            # Handle "Csoportos beszedés" (direct debit/collection) invoices
+            is_collection = "Csoportos beszedés" in status or "Beszedés alatt" in status
+            if is_collection and self._encashment_reported_as_paid_after_deadline:
+                # Check if deadline has passed
+                deadline_date = datetime.strptime(deadline, "%Y-%m-%d").replace(tzinfo=TZ).date()
+                if deadline_date < datetime.now(tz=TZ).date():
+                    # Don't include in unpaid list (treated as paid after deadline)
+                    _LOGGER.debug(
+                        "Skipping collection invoice %s (deadline passed): %s",
+                        invoice_no,
+                        provider,
+                    )
+                    return None
+
+            invoice = Invoice(
+                provider,
+                display_name,
+                invoice_no,
+                issuance_date,
+                amount,
+                deadline,
+                total_amount,
+            )
+
+            _LOGGER.info("Invoice created from JS data. %s", invoice)
+
+        except (KeyError, ValueError) as e:
+            _LOGGER.warning("Failed to create invoice from JS data: %s. Data: %s", e, invoice_data)
+            return None
+        else:
+            return invoice
 
     def _is_invoice_paid(self: Self, row: PyQuery) -> bool | None:
         state_text = row.children("td:nth-child(8)").text()
