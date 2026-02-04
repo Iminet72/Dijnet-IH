@@ -30,12 +30,23 @@ def _parse_deadline(raw_deadline: date | datetime | str | None) -> date | None:
     """Convert deadline value to date."""
     if raw_deadline is None:
         return None
-    if isinstance(raw_deadline, date) and not isinstance(raw_deadline, datetime):
-        return raw_deadline
+
     if isinstance(raw_deadline, datetime):
         return raw_deadline.date()
+
+    if isinstance(raw_deadline, date):
+        return raw_deadline
+
     if isinstance(raw_deadline, str):
-        return datetime.fromisoformat(raw_deadline).date()
+        for normalized_deadline in (raw_deadline, raw_deadline.replace(".", "-")):
+            try:
+                return date.fromisoformat(normalized_deadline)
+            except ValueError:
+                continue
+        _LOGGER.debug(
+            "Unrecognized deadline format (tried YYYY-MM-DD and YYYY.MM.DD): %s", raw_deadline
+        )
+
     return None
 
 

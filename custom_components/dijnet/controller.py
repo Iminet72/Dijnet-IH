@@ -630,9 +630,9 @@ class DijnetController:
                             download_url = f"https://www.dijnet.hu/ekonto/control/{href}"
                             _LOGGER.debug("Downloadable file found (%s).", download_url)
 
-                            full_path = path.join(directory, filename)
+                            full_path = anyio.Path(directory) / filename
 
-                            if path.exists(full_path):
+                            if await full_path.exists():
                                 _LOGGER.debug("File already downloaded (%s)", full_path)
                             else:
                                 _LOGGER.info(
