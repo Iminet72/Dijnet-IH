@@ -710,18 +710,29 @@ class DijnetController:
     def _create_invoice_from_row(
         self: Self, row: PyQuery, paid_at: datetime | None = None
     ) -> Invoice:
-        provider = row.children("td:nth-child(1)").text()
-        display_name = row.children("td:nth-child(2)").text()
-        invoice_no = row.children("td:nth-child(3)").text()
+        cells = [cell.text() for cell in row.children("td").items()]
+
+        provider = cells[0]
+        display_name = cells[1]
+        invoice_no = cells[2]
         issuance_date = (
-            datetime.strptime(row.children("td:nth-child(4)").text(), DATE_FORMAT)
-            .replace(tzinfo=TZ)
-            .date()
-            .isoformat()
+            datetime.strptime(cells[3], DATE_FORMAT).replace(tzinfo=TZ).date().isoformat()
         )
-        total_amount = int(re.sub(r"[^0-9\-]+", "", row.children("td:nth-child(5)").text()))
-        amount = int(re.sub(r"[^0-9\-]+", "", row.children("td:nth-child(7)").text()))
-        deadline = convert_deadline_to_date(row.children("td:nth-child(6)").text()).isoformat()
+
+        # The invoice list pages have slightly different column layouts.
+        # If only one amount column is present, use it for both total and payable.
+        if len(cells) >= 8:
+            total_amount_text = cells[4]
+            deadline_text = cells[5]
+            amount_text = cells[6]
+        else:
+            total_amount_text = cells[4]
+            amount_text = cells[4]
+            deadline_text = cells[5]
+
+        total_amount = int(re.sub(r"[^0-9\-]+", "", total_amount_text))
+        amount = int(re.sub(r"[^0-9\-]+", "", amount_text))
+        deadline = convert_deadline_to_date(deadline_text).isoformat()
 
         invoice: Invoice = None
         if paid_at:
@@ -751,7 +762,8 @@ class DijnetController:
         return invoice
 
     def _is_invoice_paid(self: Self, row: PyQuery) -> bool | None:
-        state_text = row.children("td:nth-child(8)").text()
+        cells = [cell.text() for cell in row.children("td").items()]
+        state_text = cells[-1] if cells else ""
 
         paid_states: list[str] = ["Rendezett", "Fizetve"]
         unpaid_states: list[str] = [
