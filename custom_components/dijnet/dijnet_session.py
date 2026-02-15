@@ -115,7 +115,13 @@ class DijnetSession:
         """
         _LOGGER.debug("Getting szamla_hist page.")
         async with self._session.get(f"{ROOT_URL}/ekonto/control/szamla_hist") as response:
-            return await response.read()
+            if response.status != 200:  # noqa: PLR2004
+                _LOGGER.warning(
+                    "Non-200 status code from szamla_hist: %d", response.status
+                )
+            content = await response.read()
+            _LOGGER.debug("Received szamla_hist response: %d bytes", len(content))
+            return content
 
     async def get_invoice_list_page(self: Self) -> bytes:
         """
