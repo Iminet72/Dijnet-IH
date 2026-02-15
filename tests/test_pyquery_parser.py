@@ -107,9 +107,8 @@ def test_safe_pyquery_from_bytes_invalid_encoding() -> None:
     # Use utf-16 encoded data with ascii decoder to trigger decode error
     utf16_text = "Test".encode("utf-16")
     result = _safe_pyquery_from_bytes(utf16_text, encoding="ascii", context="test_bad_encode")
-    # This might return None due to decode error or create a PyQuery with mojibake
-    # The important thing is it doesn't crash
-    assert result is None or result is not None  # Just ensure no exception
+    # UTF-16 encoded text cannot be decoded as ASCII, should return None
+    assert result is None
 
 
 def test_safe_pyquery_from_bytes_malformed_html() -> None:

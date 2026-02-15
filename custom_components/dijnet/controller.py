@@ -648,7 +648,7 @@ class DijnetController:
                         )
 
                         # Try to find payment info in the history page
-                        payment_info_found = False
+                        paid_at = None
                         if invoice_history_page_response_pyquery is not None:
                             for history_row in invoice_history_page_response_pyquery.find(
                                 ".table tr"
@@ -665,13 +665,10 @@ class DijnetController:
                                         .date()
                                         .isoformat()
                                     )
-                                    invoice = self._create_invoice_from_row(row, paid_at)
-                                    possible_new_paid_invoices.append(invoice)
-                                    payment_info_found = True
                                     break
 
                         # Fallback: payment info not found in history, use deadline as paid_at
-                        if not payment_info_found:
+                        if paid_at is None:
                             if invoice_history_page_response_pyquery is None:
                                 _LOGGER.debug(
                                     "Invoice history page could not be parsed, "
@@ -685,8 +682,10 @@ class DijnetController:
                                 .date()
                                 .isoformat()
                             )
-                            invoice = self._create_invoice_from_row(row, paid_at)
-                            possible_new_paid_invoices.append(invoice)
+
+                        # Create paid invoice with the determined paid_at date
+                        invoice = self._create_invoice_from_row(row, paid_at)
+                        possible_new_paid_invoices.append(invoice)
 
                     else:
                         invoice = self._create_invoice_from_row(row)
