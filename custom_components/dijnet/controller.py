@@ -58,6 +58,59 @@ def convert_deadline_to_date(deadline_str: str) -> date:
     return datetime.strptime(deadline_str, DATE_FORMAT).replace(tzinfo=TZ).date()
 
 
+def _safe_pyquery_from_bytes(
+    page_bytes: bytes, encoding: str = "iso-8859-2", context: str = ""
+) -> PyQuery | None:
+    """
+    Safely create a PyQuery object from bytes with validation and error handling.
+
+    Args:
+      page_bytes:
+        The raw HTML page content as bytes.
+      encoding:
+        The character encoding of the page (default: "iso-8859-2").
+      context:
+        Optional context string for logging (e.g., "invoice_history_page").
+
+    Returns:
+      A PyQuery object if parsing succeeds, None otherwise.
+    """
+    # Check if the response is empty after stripping whitespace
+    if not page_bytes or not page_bytes.strip():
+        _LOGGER.debug(
+            "Empty or whitespace-only response received%s. Length: %d bytes",
+            f" for {context}" if context else "",
+            len(page_bytes),
+        )
+        return None
+
+    try:
+        # Decode and re-encode as done in the rest of the codebase
+        decoded_page = page_bytes.decode(encoding)
+        encoded_page = decoded_page.encode("utf-8")
+
+        # Try to create PyQuery object
+        return PyQuery(encoded_page)
+    except UnicodeDecodeError:
+        _LOGGER.warning(
+            "Failed to decode page%s as %s. Response length: %d bytes, prefix: %s",
+            f" ({context})" if context else "",
+            encoding,
+            len(page_bytes),
+            page_bytes[:200] if len(page_bytes) > 0 else b"",
+        )
+        return None
+    except Exception as e:  # noqa: BLE001
+        _LOGGER.warning(
+            "Failed to parse page%s with PyQuery: %s. Response length: %d bytes, prefix: %s",
+            f" ({context})" if context else "",
+            e,
+            len(page_bytes),
+            page_bytes[:200] if len(page_bytes) > 0 else b"",
+        )
+        return None
+
+
 class InvoiceIssuer:
     """Represents an invoice issuer."""
 
@@ -588,37 +641,51 @@ class DijnetController:
                     if is_paid:
                         await session.get_invoice_page(index)
                         invoice_history_page = await session.get_invoice_history_page()
-                        invoice_history_page_response_pyquery = PyQuery(
-                            invoice_history_page.decode("iso-8859-2").encode("utf-8")
+
+                        # Safely parse the invoice history page with validation
+                        invoice_history_page_response_pyquery = _safe_pyquery_from_bytes(
+                            invoice_history_page, encoding="iso-8859-2", context="invoice_history"
                         )
-                        for history_row in invoice_history_page_response_pyquery.find(
-                            ".table tr"
-                        ).items():
-                            payment_text = history_row.children("td:nth-child(4)").text()
-                            is_successful_payment = payment_text == "**Sikeres fizetés**"
-                            if is_successful_payment:
-                                paid_at = (
-                                    datetime.strptime(
-                                        history_row.children("td:nth-child(1)").text(), DATE_FORMAT
+
+                        # Try to find payment info in the history page
+                        paid_at = None
+                        if invoice_history_page_response_pyquery is not None:
+                            for history_row in invoice_history_page_response_pyquery.find(
+                                ".table tr"
+                            ).items():
+                                payment_text = history_row.children("td:nth-child(4)").text()
+                                is_successful_payment = payment_text == "**Sikeres fizetés**"
+                                if is_successful_payment:
+                                    paid_at = (
+                                        datetime.strptime(
+                                            history_row.children("td:nth-child(1)").text(),
+                                            DATE_FORMAT,
+                                        )
+                                        .replace(tzinfo=TZ)
+                                        .date()
+                                        .isoformat()
                                     )
-                                    .replace(tzinfo=TZ)
-                                    .date()
-                                    .isoformat()
+                                    break
+
+                        # Fallback: payment info not found in history, use deadline as paid_at
+                        if paid_at is None:
+                            if invoice_history_page_response_pyquery is None:
+                                _LOGGER.debug(
+                                    "Invoice history page could not be parsed, "
+                                    "using fallback date for paid invoice"
                                 )
-                                invoice = self._create_invoice_from_row(row, paid_at)
-                                possible_new_paid_invoices.append(invoice)
-                            else:
-                                # payment info not found, but invoice paid
-                                paid_at = (
-                                    datetime.strptime(
-                                        row.children("td:nth-child(6)").text(), DATE_FORMAT
-                                    )
-                                    .replace(tzinfo=TZ)
-                                    .date()
-                                    .isoformat()
+                            paid_at = (
+                                datetime.strptime(
+                                    row.children("td:nth-child(6)").text(), DATE_FORMAT
                                 )
-                                invoice = self._create_invoice_from_row(row, paid_at)
-                                possible_new_paid_invoices.append(invoice)
+                                .replace(tzinfo=TZ)
+                                .date()
+                                .isoformat()
+                            )
+
+                        # Create paid invoice with the determined paid_at date
+                        invoice = self._create_invoice_from_row(row, paid_at)
+                        possible_new_paid_invoices.append(invoice)
 
                     else:
                         invoice = self._create_invoice_from_row(row)
